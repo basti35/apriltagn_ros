@@ -10,7 +10,7 @@
 
     <param name="debug" value="0" type="int"/>
     <param name="nthreads" value="4" type="int"/>
-    <param name="decimate" value="1.0" type="double"/>
+    <param name="decimate" value="3.0" type="double"/>
     <param name="refine_edges" value="0" type="int"/>
     <param name="refine_decode" value="0" type="int"/>
     <param name="refine_pose" value="0" type="int"/>
