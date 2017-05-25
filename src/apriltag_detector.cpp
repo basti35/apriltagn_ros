@@ -48,6 +48,7 @@ either expressed or implied, of the Regents of The University of Michigan.
 #include <tf/transform_broadcaster.h>
 
 #include <cv_bridge/cv_bridge.h>
+#include <std_msgs/Bool.h>
 #include <sensor_msgs/image_encodings.h>
 #include <sensor_msgs/CameraInfo.h>
 #include <geometry_msgs/PoseStamped.h>
@@ -64,35 +65,44 @@ using namespace std;
 //using namespace cv;
 
 #define SHOW_IMAGE 1
+#define LOG_DIFF_TIME std::cout << __LINE__ << " DT = " <<  ros::Time::now() - start_ << std::endl;
 
 class AprilTagDetector
 {
   getopt_t *getopt;
+
+  cv_bridge::CvImageConstPtr cv_ptr_;
   cv::Mat gray;
   apriltag_family_t *tf_;
   apriltag_detector_t *td_;
 	ros::NodeHandle node_;
   double tag_size_;
+  bool new_image_;
   std::string famname_,
               image_topic_;
   message_filters::TimeSynchronizer<sensor_msgs::Image, sensor_msgs::CameraInfo> sync_a_;
 
   message_filters::Subscriber<sensor_msgs::Image> image_sub_;
   message_filters::Subscriber<sensor_msgs::CameraInfo> info_sub_;
+  sensor_msgs::CameraInfoConstPtr cam_info_;
 
   ros::Publisher pose_pub_;
+  ros::Time start_;
 
   public:
     AprilTagDetector(const ros::NodeHandle);
     ~AprilTagDetector();
     Eigen::Matrix4d getRelativeTransform(double, double, double, double, double [4][2]) const;
     void imageCallback (const sensor_msgs::ImageConstPtr&, const sensor_msgs::CameraInfoConstPtr&);
+    void process();
 };
 
 
 AprilTagDetector::AprilTagDetector(ros::NodeHandle nh)
   :sync_a_(1),
-   node_(nh)   
+   node_(nh),
+   new_image_(false),
+   start_(ros::Time::now())
 {
     node_.param<std::string>("family", famname_, std::string("tag36h11"));
 
@@ -198,17 +208,29 @@ Eigen::Matrix4d AprilTagDetector::getRelativeTransform(double fx, double fy, dou
 
 void AprilTagDetector::imageCallback(const sensor_msgs::ImageConstPtr& msg, const sensor_msgs::CameraInfoConstPtr& cam_info)
 {
-  cv_bridge::CvImagePtr cv_ptr;
+  cam_info_ = cam_info;
+
+  new_image_ = true;
+  start_ =  ros::Time::now();
   try{
-    cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
+    cv_ptr_ = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::BGR8);
   }
   catch (cv_bridge::Exception& e){
     ROS_ERROR("cv_bridge exception: %s", e.what());
     return;
   }
+  LOG_DIFF_TIME
+}
+
+void AprilTagDetector::process()
+{
+  if(new_image_)
+    new_image_ = false;
+  else
+    return;
 
   cv::Mat gray;
-  cv::cvtColor(cv_ptr->image, gray, CV_BGR2GRAY);
+  cv::cvtColor(cv_ptr_->image, gray, CV_BGR2GRAY);
   // Make an image_u8_t header for the Mat data
   image_u8_t im = { .width = gray.cols,
       .height = gray.rows,
@@ -219,24 +241,28 @@ void AprilTagDetector::imageCallback(const sensor_msgs::ImageConstPtr& msg, cons
   zarray_t *detections = apriltag_detector_detect(td_, &im);
   ROS_DEBUG("%d tag detected", zarray_size(detections));
 
+  LOG_DIFF_TIME
+
   static tf::TransformBroadcaster br;
   tf::Transform transform;
 
-  double fx = cam_info->P[0];
-  double fy = cam_info->P[5];
-  double px = cam_info->P[2];
-  double py = cam_info->P[6];
+  double fx = cam_info_->P[0];
+  double fy = cam_info_->P[5];
+  double px = cam_info_->P[2];
+  double py = cam_info_->P[6];
 
 
   geometry_msgs::PoseArray tag_pose_array;
   tag_pose_array.header.frame_id = "camera";
 
-  bool tag_seen[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+  LOG_DIFF_TIME
 
   // Draw detection outlines
   for (int i = 0; i < zarray_size(detections); i++)
   {
       
+      LOG_DIFF_TIME
       apriltag_detection_t *det;
       zarray_get(detections, i, &det);
       Eigen::Matrix4d transform = getRelativeTransform(fx, fy, px, py, det->p);
@@ -254,6 +280,8 @@ void AprilTagDetector::imageCallback(const sensor_msgs::ImageConstPtr& msg, cons
                cv::Point(det->p[3][0], det->p[3][1]),
                cv::Scalar(0xff, 0, 0), 2);
 #endif
+
+      LOG_DIFF_TIME
       Eigen::Matrix3d rot = transform.block(0, 0, 3, 3);
       Eigen::Quaternion<double> rot_quaternion;
       rot_quaternion = rot;
@@ -266,10 +294,9 @@ void AprilTagDetector::imageCallback(const sensor_msgs::ImageConstPtr& msg, cons
       tag_pose.pose.orientation.y = rot_quaternion.y();
       tag_pose.pose.orientation.z = rot_quaternion.z();
       tag_pose.pose.orientation.w = rot_quaternion.w();
-      tag_pose.header = cv_ptr->header;
+      tag_pose.header = cv_ptr_->header;
 
       tag_pose_array.poses.push_back(tag_pose.pose);
-      tag_seen[det->id] = true;
 #if SHOW_IMAGE > 0
       stringstream ss;
       ss << det->id;
@@ -283,11 +310,15 @@ void AprilTagDetector::imageCallback(const sensor_msgs::ImageConstPtr& msg, cons
                                  det->c[1]+textsize.height/2),
               fontface, fontscale, cv::Scalar(0xff, 0x99, 0), 2);
 #endif
+      LOG_DIFF_TIME
   }
+  
   zarray_destroy(detections);
 
-  if(tag_seen[1] && tag_seen[2])
-    pose_pub_.publish(tag_pose_array);
+  LOG_DIFF_TIME
+
+  pose_pub_.publish(tag_pose_array);
+
 #if SHOW_IMAGE > 0
   if(!gray.empty())
     cv::imshow("Tag Detections", gray);
@@ -306,6 +337,7 @@ int main(int argc, char *argv[])
   while (ros::ok())
   {
     ros::spinOnce();
+    ad.process();
   }
   
   return 0;
