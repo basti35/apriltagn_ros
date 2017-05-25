@@ -1,0 +1,4 @@
+<launch>
+  <include file="$(find apriltagn_ros)/launch/v4l.launch" />
+  <include file="$(find apriltagn_ros)/launch/apriltagn.launch" />
+</launch>

@@ -1,0 +1,23 @@
+<launch>
+    <!-- Select the tag family: 16h5, 25h7, 25h9, 36h9, or 36h11(default) -->
+    <param name="family" type="str" value="tag36h11"/>
+
+    <!-- Optional: Subscribe to the compressed stream-->
+    <param name="image_transport" type="str" value="compressed" />
+
+    <param name="tag_size" value="0.163513" type="double"/>
+    <param name="tag_size" value="0.081756" type="double"/>
+
+    <param name="debug" value="0" type="int"/>
+    <param name="nthreads" value="4" type="int"/>
+    <param name="decimate" value="1.0" type="double"/>
+    <param name="refine_edges" value="0" type="int"/>
+    <param name="refine_decode" value="0" type="int"/>
+    <param name="refine_pose" value="0" type="int"/>
+  <node pkg="apriltagn_ros" type="apriltag_detector" name="apriltag_detector" output="screen">
+    <!-- Remap topic required by the node to custom topics -->
+    <!-- remap from="image" to=" " /-->
+    <!-- remap from="camera_info" to=" " /-->
+
+  </node>
+</launch>
